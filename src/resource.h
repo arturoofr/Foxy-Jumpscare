@@ -15,10 +15,11 @@
 #define IDM_VOLUME          2003
 #define IDM_QUIT            2004
 
-#define IDM_PROB_1000       3001
-#define IDM_PROB_10000      3002
-#define IDM_PROB_100000     3003
-#define IDM_PROB_1000000    3004
-#define IDM_PROB_CUSTOM     3005
+#define IDM_PROB_100        3001
+#define IDM_PROB_500        3002
+#define IDM_PROB_700        3003
+#define IDM_PROB_1000       3004
+#define IDM_PROB_10000      3005
+#define IDM_PROB_CUSTOM     3006
 
 #endif

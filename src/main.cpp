@@ -35,7 +35,7 @@ static const wchar_t* CLASS_NAME = L"FoxyTrayControllerClass";
 static const wchar_t* JUMPSCARE_CLASS = L"FoxyJumpscareOverlayClass";
 static const UINT WM_TRAYICON = WM_USER + 1;
 static const UINT_PTR TIMER_ID = 101;
-static const unsigned int MIN_DENOMINATOR = 700; // Divisor minimo permitido (1/700) para evitar lag
+static const unsigned int MIN_DENOMINATOR = 100; // Divisor minimo permitido (1/100) para evitar lag
 
 // Variables globales de estado de la aplicacion
 static NOTIFYICONDATAW g_nid = {};
@@ -45,7 +45,7 @@ static HWND g_hJumpscareWnd = NULL;
 static bool g_active = true;                     // Define si los rolls del jumpscare estan activos
 static bool g_isJumpscaring = false;             // Evita solapar dos reproducciones simultaneas
 static int g_volume = 100;                       // Volumen de reproduccion (0 a 100)
-static unsigned int g_probDenominator = 10000;   // Divisor N de la probabilidad (1/N por segundo)
+static unsigned int g_probDenominator = 1000;    // Divisor N de la probabilidad (1/N por segundo)
 static uint64_t g_rngState = 0;                  // Estado interno del generador aleatorio de 64 bits
 
 // Rutas absolutas hacia los archivos de configuracion y recursos
@@ -122,7 +122,7 @@ void InitRng() {
     if (g_rngState == 0) g_rngState = 0x9E3779B97F4A7C15ULL;
 }
 
-// Genera un numero entero uniforme en el rango [0, bound) soportando divisores grandes (1/1000000+)
+// Genera un numero entero uniforme en el rango [0, bound) soportando divisores grandes
 uint32_t NextRandomBounded(uint32_t bound) {
     if (bound <= 1) return 0;
     uint64_t x = (g_rngState += 0x9E3779B97F4A7C15ULL);
@@ -265,7 +265,7 @@ void LoadSettings() {
     if (g_volume < 0) g_volume = 0;
     if (g_volume > 100) g_volume = 100;
 
-    unsigned int denom = (unsigned int)GetPrivateProfileIntW(L"Settings", L"Denominator", 10000, g_configPath);
+    unsigned int denom = (unsigned int)GetPrivateProfileIntW(L"Settings", L"Denominator", 1000, g_configPath);
     if (denom < MIN_DENOMINATOR) denom = MIN_DENOMINATOR;
     g_probDenominator = denom;
 }
@@ -319,16 +319,18 @@ void ShowTrayMenu(HWND hwnd) {
     HMENU hMenu = CreatePopupMenu();
     HMENU hProbMenu = CreatePopupMenu();
 
+    bool is100 = (g_probDenominator == 100);
+    bool is500 = (g_probDenominator == 500);
+    bool is700 = (g_probDenominator == 700);
     bool is1k = (g_probDenominator == 1000);
     bool is10k = (g_probDenominator == 10000);
-    bool is100k = (g_probDenominator == 100000);
-    bool is1m = (g_probDenominator == 1000000);
-    bool isCustom = !(is1k || is10k || is100k || is1m);
+    bool isCustom = !(is100 || is500 || is700 || is1k || is10k);
 
+    AppendMenuW(hProbMenu, MF_STRING | (is100 ? MF_CHECKED : 0), IDM_PROB_100, L"1/100");
+    AppendMenuW(hProbMenu, MF_STRING | (is500 ? MF_CHECKED : 0), IDM_PROB_500, L"1/500");
+    AppendMenuW(hProbMenu, MF_STRING | (is700 ? MF_CHECKED : 0), IDM_PROB_700, L"1/700");
     AppendMenuW(hProbMenu, MF_STRING | (is1k ? MF_CHECKED : 0), IDM_PROB_1000, L"1/1000");
     AppendMenuW(hProbMenu, MF_STRING | (is10k ? MF_CHECKED : 0), IDM_PROB_10000, L"1/10000");
-    AppendMenuW(hProbMenu, MF_STRING | (is100k ? MF_CHECKED : 0), IDM_PROB_100000, L"1/100000");
-    AppendMenuW(hProbMenu, MF_STRING | (is1m ? MF_CHECKED : 0), IDM_PROB_1000000, L"1/1000000");
     AppendMenuW(hProbMenu, MF_SEPARATOR, 0, NULL);
 
     wchar_t customLabel[64];
@@ -395,7 +397,7 @@ INT_PTR CALLBACK VolumeDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
     return FALSE;
 }
 
-// Controlador del cuadro de dialogo para configurar una probabilidad personalizada (>= 1/700)
+// Controlador del cuadro de dialogo para configurar una probabilidad personalizada (>= 1/100)
 INT_PTR CALLBACK ProbDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_INITDIALOG: {
@@ -411,8 +413,8 @@ INT_PTR CALLBACK ProbDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
             const wchar_t* p = wcsrchr(buf, L'/');
             unsigned long val = wcstoul(p ? (p + 1) : buf, NULL, 10);
             if (val < MIN_DENOMINATOR) {
-                MessageBoxW(hDlg, L"La probabilidad no puede ser mayor a 1/700 (el divisor debe ser como minimo 700).", L"Foxy Jumpscare", MB_ICONWARNING | MB_OK);
-                SetDlgItemTextW(hDlg, IDC_PROB_EDIT, L"700");
+                MessageBoxW(hDlg, L"La probabilidad no puede ser mayor a 1/100 (el divisor debe ser como minimo 100).", L"Foxy Jumpscare", MB_ICONWARNING | MB_OK);
+                SetDlgItemTextW(hDlg, IDC_PROB_EDIT, L"100");
                 return TRUE;
             }
             g_probDenominator = (unsigned int)val;
@@ -477,7 +479,7 @@ HRESULT InitializeMediaEngine() {
     return pFactory->CreateInstance(0, pAttr.Get(), &g_pMediaEngine);
 }
 
-// Lanza la ventana superpuesta en modo click-through sin robar el foco de juegos ni aplicaciones
+// Lanza la ventana superpuesta en la pantalla principal (monitor 1) sin robar el foco
 void TriggerJumpscare() {
     if (g_isJumpscaring) return;
     if (!EnsureVideoFile()) return;
@@ -490,10 +492,11 @@ void TriggerJumpscare() {
     g_pMediaEngine->SetSource(bstrURL);
     SysFreeString(bstrURL);
 
-    int x = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    int y = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    int w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    int h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    // Coordenadas y resolucion de la pantalla principal (primera pantalla)
+    int x = 0;
+    int y = 0;
+    int w = GetSystemMetrics(SM_CXSCREEN);
+    int h = GetSystemMetrics(SM_CYSCREEN);
 
     // WS_EX_TRANSPARENT + WS_EX_NOACTIVATE permiten seguir usando el raton y teclado en el juego activo
     g_hJumpscareWnd = CreateWindowExW(
@@ -684,20 +687,24 @@ LRESULT CALLBACK HiddenWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
         break;
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
+        case IDM_PROB_100:
+            g_probDenominator = 100;
+            SaveSettings();
+            break;
+        case IDM_PROB_500:
+            g_probDenominator = 500;
+            SaveSettings();
+            break;
+        case IDM_PROB_700:
+            g_probDenominator = 700;
+            SaveSettings();
+            break;
         case IDM_PROB_1000:
             g_probDenominator = 1000;
             SaveSettings();
             break;
         case IDM_PROB_10000:
             g_probDenominator = 10000;
-            SaveSettings();
-            break;
-        case IDM_PROB_100000:
-            g_probDenominator = 100000;
-            SaveSettings();
-            break;
-        case IDM_PROB_1000000:
-            g_probDenominator = 1000000;
             SaveSettings();
             break;
         case IDM_PROB_CUSTOM:
