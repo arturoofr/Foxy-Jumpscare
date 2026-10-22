@@ -4,9 +4,9 @@ Aplicacion ligera en C++ nativo (Win32 + Direct3D 11 + Media Foundation) para Wi
 
 ---
 
-## Descarga directa (listo para usar)
+## Descarga directa (listo para usar - v1.0.1)
 
-Si no deseas compilar el proyecto por tu cuenta, puedes descargar y ejecutar directamente la version precompilada incluida en el repositorio:
+Si no deseas compilar el proyecto por tu cuenta, puedes descargar y ejecutar directamente la version precompilada incluida en el repositorio o desde la seccion [Releases](https://github.com/arturoofr/Foxy-Jumpscare/releases/tag/v1.0.1):
 
 - **Paquete portable completo (.zip):** [`release/FoxyJumpscare-Portable.zip`](release/FoxyJumpscare-Portable.zip)
 - **Ejecutable directo (.exe):** [`release/FoxyJumpscare.exe`](release/FoxyJumpscare.exe)
@@ -18,6 +18,7 @@ Si no deseas compilar el proyecto por tu cuenta, puedes descargar y ejecutar dir
 ## Caracteristicas principales
 
 - **Ejecucion en bandeja del sistema (Tray):** Consumo minimo de RAM y CPU en segundo plano sin mostrar ventanas en la barra de tareas.
+- **Sistema de tiradas por doble numero (1/X):** Cada segundo se generan dos numeros aleatorios independientes de 64 bits entre `1` y el limite `X` configurado; si ambos numeros coinciden (`roll1 == roll2`), se ejecuta el jumpscare.
 - **Eliminacion de fondo verde (Chroma Key):** Procesamiento acelerado con Direct3D 11 y filtrado de color para eliminar por completo el fondo verde del video `.mp4`.
 - **Superposicion no intrusiva (Click-Through):** La ventana del jumpscare utiliza `WS_EX_TRANSPARENT` y `WS_EX_NOACTIVATE`. No roba el foco del teclado ni del raton, permitiendo seguir jugando o utilizando cualquier aplicacion mientras se reproduce la animacion.
 - **Persistencia automatica:** Toda la configuracion se guarda automaticamente en `config.ini`.
