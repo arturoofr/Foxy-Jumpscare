@@ -20,7 +20,7 @@ STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTI
 CAPTION "Probabilidad personalizada"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    LTEXT           "Introduce el divisor N para 1/N (minimo 700):", -1, 12, 10, 160, 12
+    LTEXT           "Introduce el divisor N para 1/N (minimo 100):", -1, 12, 10, 160, 12
     LTEXT           "1 /", -1, 14, 30, 14, 12
     EDITTEXT        IDC_PROB_EDIT, 30, 28, 140, 14, ES_AUTOHSCROLL | ES_NUMBER
     DEFPUSHBUTTON   "Guardar", IDOK, 38, 56, 50, 15
