@@ -1,0 +1,28 @@
+#include "resource.h"
+#include <windows.h>
+#include <commctrl.h>
+
+IDI_APP_ICON ICON "../assets/foxyicon.ico"
+IDR_MP4_VIDEO RCDATA "../assets/foxyjumpscare.mp4"
+
+IDD_VOLUME_DIALOG DIALOGEX 0, 0, 170, 72
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Volumen"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    LTEXT           "Volumen: 100%", IDC_VOLUME_TEXT, 12, 10, 146, 10
+    CONTROL         "", IDC_VOLUME_SLIDER, "msctls_trackbar32", TBS_AUTOTICKS | TBS_BOTH | WS_TABSTOP, 10, 24, 150, 22
+    DEFPUSHBUTTON   "Aceptar", IDOK, 60, 50, 50, 15
+END
+
+IDD_PROB_DIALOG DIALOGEX 0, 0, 185, 82
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Probabilidad personalizada"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    LTEXT           "Introduce el divisor N para 1/N (minimo 700):", -1, 12, 10, 160, 12
+    LTEXT           "1 /", -1, 14, 30, 14, 12
+    EDITTEXT        IDC_PROB_EDIT, 30, 28, 140, 14, ES_AUTOHSCROLL | ES_NUMBER
+    DEFPUSHBUTTON   "Guardar", IDOK, 38, 56, 50, 15
+    PUSHBUTTON      "Cancelar", IDCANCEL, 96, 56, 50, 15
+END
