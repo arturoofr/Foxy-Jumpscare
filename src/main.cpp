@@ -674,7 +674,10 @@ LRESULT CALLBACK HiddenWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
         break;
     case WM_TIMER:
         if (wParam == TIMER_ID && g_active && !g_isJumpscaring) {
-            if (NextRandomBounded(g_probDenominator) == 0) {
+            // Cada segundo se generan dos numeros del 1 al limite maximo; si coinciden salta el jumpscare
+            uint32_t roll1 = 1 + NextRandomBounded(g_probDenominator);
+            uint32_t roll2 = 1 + NextRandomBounded(g_probDenominator);
+            if (roll1 == roll2) {
                 TriggerJumpscare();
             }
         }
