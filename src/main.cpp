@@ -1,3 +1,5 @@
+#define UNICODE
+#define _UNICODE
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <shellapi.h>
@@ -10,6 +12,7 @@
 #include <wrl/client.h>
 #include <wchar.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include "resource.h"
 
 #pragma comment(lib, "mfplat.lib")
@@ -27,25 +30,30 @@
 
 using Microsoft::WRL::ComPtr;
 
+// Nombres de clases de ventana e identificadores de eventos
 static const wchar_t* CLASS_NAME = L"FoxyTrayControllerClass";
 static const wchar_t* JUMPSCARE_CLASS = L"FoxyJumpscareOverlayClass";
 static const UINT WM_TRAYICON = WM_USER + 1;
 static const UINT_PTR TIMER_ID = 101;
-static const unsigned int MIN_DENOMINATOR = 700;
+static const unsigned int MIN_DENOMINATOR = 700; // Divisor minimo permitido (1/700) para evitar lag
 
+// Variables globales de estado de la aplicacion
 static NOTIFYICONDATAW g_nid = {};
 static HINSTANCE g_hInst = NULL;
 static HWND g_hHiddenWnd = NULL;
 static HWND g_hJumpscareWnd = NULL;
-static bool g_active = true;
-static bool g_isJumpscaring = false;
-static int g_volume = 100;
-static unsigned int g_probDenominator = 10000;
+static bool g_active = true;                     // Define si los rolls del jumpscare estan activos
+static bool g_isJumpscaring = false;             // Evita solapar dos reproducciones simultaneas
+static int g_volume = 100;                       // Volumen de reproduccion (0 a 100)
+static unsigned int g_probDenominator = 10000;   // Divisor N de la probabilidad (1/N por segundo)
+static uint64_t g_rngState = 0;                  // Estado interno del generador aleatorio de 64 bits
 
+// Rutas absolutas hacia los archivos de configuracion y recursos
 static wchar_t g_configPath[MAX_PATH] = {};
 static wchar_t g_videoPath[MAX_PATH] = {};
 static wchar_t g_iconPath[MAX_PATH] = {};
 
+// Objetos Direct3D 11, Media Foundation y buffers GDI para renderizar el video sin fondo verde
 static ComPtr<IMFMediaEngine> g_pMediaEngine;
 static ComPtr<ID3D11Device> g_pD3DDevice;
 static ComPtr<ID3D11DeviceContext> g_pD3DContext;
@@ -56,6 +64,8 @@ static HBITMAP g_hDIBSection = NULL;
 static HDC g_hDIBDC = NULL;
 static void* g_pDIBBits = NULL;
 
+void InitRng();
+uint32_t NextRandomBounded(uint32_t bound);
 void InitPaths();
 bool EnsureVideoFile();
 void LoadSettings();
@@ -70,6 +80,7 @@ INT_PTR CALLBACK ProbDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 LRESULT CALLBACK HiddenWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK JumpscareWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
+// Callback de eventos de Media Foundation para iniciar y cerrar el video automaticamente
 class MediaEngineNotify : public IMFMediaEngineNotify {
     long m_cRef;
 public:
@@ -103,14 +114,36 @@ public:
     }
 };
 
+// Inicializa la semilla del generador de 64 bits con contadores de alta precision
+void InitRng() {
+    LARGE_INTEGER qpc = {};
+    QueryPerformanceCounter(&qpc);
+    g_rngState = (uint64_t)qpc.QuadPart ^ ((uint64_t)GetTickCount64() << 32) ^ (uint64_t)GetCurrentProcessId();
+    if (g_rngState == 0) g_rngState = 0x9E3779B97F4A7C15ULL;
+}
+
+// Genera un numero entero uniforme en el rango [0, bound) soportando divisores grandes (1/1000000+)
+uint32_t NextRandomBounded(uint32_t bound) {
+    if (bound <= 1) return 0;
+    uint64_t x = (g_rngState += 0x9E3779B97F4A7C15ULL);
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+    x = x ^ (x >> 31);
+    return (uint32_t)(((uint64_t)(uint32_t)x * (uint64_t)bound) >> 32);
+}
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) {
+    // Evita que se abran multiples instancias del programa a la vez
     HANDLE hMutex = CreateMutexW(NULL, TRUE, L"FoxyJumpscare_SingleInstance_Mutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         if (hMutex) CloseHandle(hMutex);
         return 0;
     }
 
+    SetProcessDPIAware();
     g_hInst = hInstance;
+    InitRng();
+
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     MFStartup(MF_VERSION);
 
@@ -132,6 +165,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) {
     jwc.lpszClassName = JUMPSCARE_CLASS;
     RegisterClassW(&jwc);
 
+    // Ventana oculta encargada de gestionar el icono en la bandeja del sistema y el temporizador
     g_hHiddenWnd = CreateWindowExW(0, CLASS_NAME, L"FoxyJumpscare", 0, 0, 0, 0, 0, NULL, NULL, hInstance, NULL);
     if (!g_hHiddenWnd) {
         MFShutdown();
@@ -155,6 +189,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) {
     wcscpy_s(g_nid.szTip, L"Foxy Jumpscare");
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 
+    // Evalua la probabilidad una vez por segundo
     SetTimer(g_hHiddenWnd, TIMER_ID, 1000, NULL);
 
     MSG msg = {};
@@ -170,6 +205,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) {
     return 0;
 }
 
+// Resuelve las rutas absolutas respecto al directorio del ejecutable
 void InitPaths() {
     wchar_t baseDir[MAX_PATH] = {};
     GetModuleFileNameW(NULL, baseDir, MAX_PATH);
@@ -194,6 +230,7 @@ void InitPaths() {
     }
 }
 
+// Garantiza que el archivo .mp4 este disponible en disco o lo extrae desde los recursos embebidos
 bool EnsureVideoFile() {
     if (GetFileAttributesW(g_videoPath) != INVALID_FILE_ATTRIBUTES) {
         return true;
@@ -221,6 +258,7 @@ bool EnsureVideoFile() {
     return written == size;
 }
 
+// Carga estado, volumen y probabilidad desde config.ini
 void LoadSettings() {
     g_active = GetPrivateProfileIntW(L"Settings", L"Active", 1, g_configPath) != 0;
     g_volume = GetPrivateProfileIntW(L"Settings", L"Volume", 100, g_configPath);
@@ -232,6 +270,7 @@ void LoadSettings() {
     g_probDenominator = denom;
 }
 
+// Guarda estado, volumen y probabilidad en config.ini
 void SaveSettings() {
     wchar_t buf[32];
     swprintf_s(buf, L"%d", g_active ? 1 : 0);
@@ -244,6 +283,7 @@ void SaveSettings() {
     WritePrivateProfileStringW(L"Settings", L"Denominator", buf, g_configPath);
 }
 
+// Comprueba si el ejecutable esta registrado en el inicio automatico de Windows
 bool IsRunOnStartup() {
     HKEY hKey;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
@@ -255,6 +295,7 @@ bool IsRunOnStartup() {
     return false;
 }
 
+// Activa o desactiva la ejecucion automatica al iniciar sesion en Windows
 void SetRunOnStartup(bool enable) {
     HKEY hKey;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
@@ -271,6 +312,7 @@ void SetRunOnStartup(bool enable) {
     }
 }
 
+// Construye y muestra el menu contextual del icono en la bandeja del sistema
 void ShowTrayMenu(HWND hwnd) {
     POINT pt;
     GetCursorPos(&pt);
@@ -317,6 +359,7 @@ void ShowTrayMenu(HWND hwnd) {
     DestroyMenu(hMenu);
 }
 
+// Controlador del cuadro de dialogo con barra deslizante para el volumen (0% - 100%)
 INT_PTR CALLBACK VolumeDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_INITDIALOG: {
@@ -352,6 +395,7 @@ INT_PTR CALLBACK VolumeDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
     return FALSE;
 }
 
+// Controlador del cuadro de dialogo para configurar una probabilidad personalizada (>= 1/700)
 INT_PTR CALLBACK ProbDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_INITDIALOG: {
@@ -385,6 +429,7 @@ INT_PTR CALLBACK ProbDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
     return FALSE;
 }
 
+// Inicializa el dispositivo Direct3D 11 con soporte de video y crea la instancia de IMFMediaEngine
 HRESULT InitializeMediaEngine() {
     D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1 };
     HRESULT hr = D3D11CreateDevice(
@@ -432,6 +477,7 @@ HRESULT InitializeMediaEngine() {
     return pFactory->CreateInstance(0, pAttr.Get(), &g_pMediaEngine);
 }
 
+// Lanza la ventana superpuesta en modo click-through sin robar el foco de juegos ni aplicaciones
 void TriggerJumpscare() {
     if (g_isJumpscaring) return;
     if (!EnsureVideoFile()) return;
@@ -449,25 +495,43 @@ void TriggerJumpscare() {
     int w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
     int h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
 
+    // WS_EX_TRANSPARENT + WS_EX_NOACTIVATE permiten seguir usando el raton y teclado en el juego activo
     g_hJumpscareWnd = CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
+        WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         JUMPSCARE_CLASS,
         L"",
-        WS_POPUP | WS_VISIBLE,
+        WS_POPUP,
         x, y, w, h,
         NULL, NULL, g_hInst, NULL
     );
+
+    if (g_hJumpscareWnd) {
+        ShowWindow(g_hJumpscareWnd, SW_SHOWNOACTIVATE);
+        SetWindowPos(g_hJumpscareWnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
 }
 
+// Procesa el renderizado de cada fotograma eliminando el fondo verde mediante chroma key
 LRESULT CALLBACK JumpscareWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
     case WM_CREATE:
+        // Define el color verde puro RGB(0, 255, 0) como clave de transparencia de la ventana
         SetLayeredWindowAttributes(hwnd, RGB(0, 255, 0), 0, LWA_COLORKEY);
         SetTimer(hwnd, 1, 16, NULL);
         return 0;
 
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
+
+    case WM_NCHITTEST:
+        return HTTRANSPARENT;
+
+    case WM_ERASEBKGND:
+        return 1;
+
     case WM_TIMER:
         if (wParam == 1 && g_pMediaEngine) {
+            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
             LONGLONG pts = 0;
             if (g_pMediaEngine->OnVideoStreamTick(&pts) == S_OK) {
                 InvalidateRect(hwnd, NULL, FALSE);
@@ -485,8 +549,14 @@ LRESULT CALLBACK JumpscareWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         DWORD nativeW = 0, nativeH = 0;
 
         if (g_pMediaEngine && SUCCEEDED(g_pMediaEngine->GetNativeVideoSize(&nativeW, &nativeH)) && nativeW > 0) {
+            // Limita la resolucion interna de procesamiento para minimizar el uso de CPU
             DWORD width = nativeW;
             DWORD height = nativeH;
+            const DWORD MAX_PROC_WIDTH = 960;
+            if (width > MAX_PROC_WIDTH) {
+                height = (DWORD)(height * ((float)MAX_PROC_WIDTH / (float)width));
+                width = MAX_PROC_WIDTH;
+            }
 
             if (!g_pVideoTexture || g_videoW != width || g_videoH != height) {
                 g_pVideoTexture.Reset();
@@ -534,6 +604,7 @@ LRESULT CALLBACK JumpscareWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                         if (SUCCEEDED(pSurface->GetDC(FALSE, &hdcTexture))) {
                             if (g_hDIBDC && g_pDIBBits) {
                                 BitBlt(g_hDIBDC, 0, 0, (int)width, (int)height, hdcTexture, 0, 0, SRCCOPY);
+                                // Filtro chroma key: convierte los pixeles verdes dominantes en verde puro transparente
                                 DWORD* pPixel = (DWORD*)g_pDIBBits;
                                 DWORD* pEnd = pPixel + (width * height);
                                 while (pPixel < pEnd) {
@@ -576,6 +647,7 @@ LRESULT CALLBACK JumpscareWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         return 0;
 
     case WM_DESTROY:
+        // Libera todos los recursos graficos y de video al finalizar el jumpscare
         g_isJumpscaring = false;
         g_hJumpscareWnd = NULL;
         if (g_pMediaEngine) {
@@ -592,6 +664,7 @@ LRESULT CALLBACK JumpscareWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }
 
+// Bucle de mensajes de la ventana oculta (temporizador de probabilidad y eventos del menu tray)
 LRESULT CALLBACK HiddenWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
     case WM_TRAYICON:
@@ -601,7 +674,7 @@ LRESULT CALLBACK HiddenWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
         break;
     case WM_TIMER:
         if (wParam == TIMER_ID && g_active && !g_isJumpscaring) {
-            if ((unsigned int)(rand() % g_probDenominator) == 0) {
+            if (NextRandomBounded(g_probDenominator) == 0) {
                 TriggerJumpscare();
             }
         }
